@@ -20,7 +20,7 @@ function errorCode(error: unknown) {
   return null;
 }
 
-async function retryProtocolConflict<T>(query: () => Promise<T>) {
+export async function retryProtocolConflict<T>(query: () => Promise<T>) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       return await query();
