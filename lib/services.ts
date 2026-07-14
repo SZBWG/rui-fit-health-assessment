@@ -136,7 +136,9 @@ export async function saveAssessmentStep(input: {
 export async function submitAssessment(userId: string, now = new Date()) {
   const prisma = getPrisma();
   const assessment = await currentAssessment(userId);
-  const existing = await prisma.assessmentResult.findUnique({ where: { assessmentId: assessment.id } });
+  const existing = await retryProtocolConflict(() => prisma.assessmentResult.findUnique({
+    where: { assessmentId: assessment.id },
+  }));
   if (existing) {
     return {
       assessmentId: assessment.id,
@@ -178,7 +180,9 @@ export async function submitAssessment(userId: string, now = new Date()) {
     }, { isolationLevel: "Serializable" });
   } catch (error) {
     if (error instanceof ApiError && error.code !== "SUBMIT_CONFLICT") throw error;
-    const winner = await prisma.assessmentResult.findUnique({ where: { assessmentId: assessment.id } });
+    const winner = await retryProtocolConflict(() => prisma.assessmentResult.findUnique({
+      where: { assessmentId: assessment.id },
+    }));
     if (winner) {
       return {
         assessmentId: assessment.id,

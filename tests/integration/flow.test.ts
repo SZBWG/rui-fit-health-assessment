@@ -22,7 +22,7 @@ const steps: Array<[StepKey, unknown]> = [
   ["activity", { activityLevel: "MODERATE" }],
 ];
 
-async function completeAssessment(userId: string) {
+async function fillAssessment(userId: string) {
   let revision = 0;
   for (const [index, [step, data]] of steps.entries()) {
     const progress = await saveAssessmentStep({
@@ -34,6 +34,10 @@ async function completeAssessment(userId: string) {
     });
     revision = Number((progress as { revision: number }).revision);
   }
+}
+
+async function completeAssessment(userId: string) {
+  await fillAssessment(userId);
   await submitAssessment(userId, new Date("2026-01-01T00:00:00Z"));
 }
 
@@ -138,6 +142,21 @@ describe("session and progress persistence", () => {
     await expect(saveAssessmentStep({ userId: created.userId, step: "gender", data: { gender: "FEMALE" }, baseRevision: 1, idempotencyKey: "locked-edit" })).rejects.toMatchObject({ code: "ASSESSMENT_LOCKED" });
   });
 
+  it("rejects unknown assessments and oversized idempotency keys", async () => {
+    await expect(getAssessmentProgress("00000000-0000-4000-8000-000000000099")).rejects.toMatchObject({
+      code: "ASSESSMENT_NOT_FOUND",
+    });
+
+    const created = await createAnonymousSession();
+    await expect(saveAssessmentStep({
+      userId: created.userId,
+      step: "age",
+      data: { age: 32 },
+      baseRevision: 0,
+      idempotencyKey: "x".repeat(101),
+    })).rejects.toMatchObject({ code: "INVALID_IDEMPOTENCY_KEY" });
+  });
+
   it("detects concurrent writes without silently losing data", async () => {
     const created = await createAnonymousSession();
     const results = await Promise.allSettled([
@@ -177,6 +196,21 @@ describe("session and progress persistence", () => {
 });
 
 describe("access control and mock payment", () => {
+  it("makes concurrent submissions converge on one persisted result", async () => {
+    const created = await createAnonymousSession();
+    await fillAssessment(created.userId);
+
+    const submittedAt = new Date("2026-01-01T00:00:00Z");
+    const results = await Promise.all([
+      submitAssessment(created.userId, submittedAt),
+      submitAssessment(created.userId, submittedAt),
+    ]);
+    expect(results[0]).toEqual(results[1]);
+    expect(await getPrisma().assessmentResult.count({
+      where: { assessment: { userId: created.userId } },
+    })).toBe(1);
+  });
+
   it("returns the same persisted result when submit is replayed", async () => {
     const created = await createAnonymousSession();
     await completeAssessment(created.userId);
@@ -217,6 +251,11 @@ describe("access control and mock payment", () => {
     expect(paid.subscriptionStatus).toBe("ACTIVE");
     expect(paid.replayed).toBe(false);
 
+    await getPrisma().subscription.update({
+      where: { userId: created.userId },
+      data: { expiresAt: null },
+    });
+
     const replay = await activateMockSubscription({
       userId: created.userId,
       eventId: "payment-flow-001",
@@ -224,6 +263,7 @@ describe("access control and mock payment", () => {
       now: new Date("2026-01-02T00:00:00Z"),
     });
     expect(replay.replayed).toBe(true);
+    expect(replay.expiresAt).toBeNull();
 
     const full = await getResultForUser(created.userId, new Date("2026-01-02T00:00:00Z"));
     expect(full.access).toBe("FULL");
@@ -245,6 +285,31 @@ describe("access control and mock payment", () => {
     const expired = await getResultForUser(created.userId, new Date("2026-01-01T00:00:00Z"));
     expect(expired.access).toBe("PREVIEW");
     expect(expired.subscriptionStatus).toBe("EXPIRED");
+  });
+
+  it("supports active access without an expiry and preserves canceled status", async () => {
+    const created = await createAnonymousSession();
+    await completeAssessment(created.userId);
+    await getPrisma().subscription.create({
+      data: {
+        userId: created.userId,
+        status: "ACTIVE",
+        planCode: "lifetime_demo",
+        activatedAt: new Date("2026-01-01T00:00:00Z"),
+      },
+    });
+
+    const active = await getResultForUser(created.userId, new Date("2030-01-01T00:00:00Z"));
+    expect(active.access).toBe("FULL");
+    expect(active.subscriptionStatus).toBe("ACTIVE");
+
+    await getPrisma().subscription.update({
+      where: { userId: created.userId },
+      data: { status: "CANCELED" },
+    });
+    const canceled = await getResultForUser(created.userId, new Date("2030-01-01T00:00:00Z"));
+    expect(canceled.access).toBe("PREVIEW");
+    expect(canceled.subscriptionStatus).toBe("CANCELED");
   });
 
   it("prevents a payment event from being replayed for another user", async () => {
