@@ -1,0 +1,153 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum AssessmentStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+enum Goal {
+  LOSE_WEIGHT
+  MAINTAIN_WEIGHT
+  GAIN_WEIGHT
+}
+
+enum ActivityLevel {
+  SEDENTARY
+  LIGHT
+  MODERATE
+  ACTIVE
+}
+
+enum SubscriptionStatus {
+  INACTIVE
+  ACTIVE
+  EXPIRED
+  CANCELED
+}
+
+enum PaymentStatus {
+  SUCCEEDED
+  FAILED
+}
+
+model User {
+  id            String         @id @default(uuid()) @db.Uuid
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+  sessions      AuthSession[]
+  assessments   Assessment[]
+  subscription  Subscription?
+  paymentEvents PaymentEvent[]
+
+  @@map("users")
+}
+
+model AuthSession {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  tokenHash String   @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("auth_sessions")
+}
+
+model Assessment {
+  id             String             @id @default(uuid()) @db.Uuid
+  userId         String             @map("user_id") @db.Uuid
+  status         AssessmentStatus   @default(IN_PROGRESS)
+  age            Int?
+  gender         Gender?
+  goal           Goal?
+  heightCm       Float?             @map("height_cm")
+  weightKg       Float?             @map("weight_kg")
+  targetWeightKg Float?             @map("target_weight_kg")
+  activityLevel  ActivityLevel?     @map("activity_level")
+  revision       Int                @default(0)
+  schemaVersion  Int                @default(1) @map("schema_version")
+  submittedAt    DateTime?          @map("submitted_at") @db.Timestamptz(3)
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  result         AssessmentResult?
+  updates        AssessmentUpdate[]
+
+  @@index([userId, createdAt])
+  @@map("assessments")
+}
+
+model AssessmentUpdate {
+  id             String     @id @default(uuid()) @db.Uuid
+  assessmentId   String     @map("assessment_id") @db.Uuid
+  idempotencyKey String     @map("idempotency_key")
+  stepKey        String     @map("step_key")
+  requestHash    String     @map("request_hash")
+  response       Json
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  assessment     Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@unique([assessmentId, idempotencyKey])
+  @@index([assessmentId, createdAt])
+  @@map("assessment_updates")
+}
+
+model AssessmentResult {
+  assessmentId           String     @id @map("assessment_id") @db.Uuid
+  bmi                    Float
+  bmiCategory            String     @map("bmi_category")
+  estimatedBmr           Int        @map("estimated_bmr")
+  estimatedDailyCalories Int        @map("estimated_daily_calories")
+  targetDate             DateTime   @map("target_date") @db.Date
+  projection             Json
+  algorithmVersion       String     @map("algorithm_version")
+  sourceRevision         Int        @map("source_revision")
+  calculatedAt           DateTime   @default(now()) @map("calculated_at") @db.Timestamptz(3)
+  assessment             Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@map("assessment_results")
+}
+
+model Subscription {
+  id          String             @id @default(uuid()) @db.Uuid
+  userId      String             @unique @map("user_id") @db.Uuid
+  status      SubscriptionStatus @default(INACTIVE)
+  planCode    String             @default("demo_monthly") @map("plan_code")
+  activatedAt DateTime?          @map("activated_at") @db.Timestamptz(3)
+  expiresAt   DateTime?          @map("expires_at") @db.Timestamptz(3)
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payments    PaymentEvent[]
+
+  @@map("subscriptions")
+}
+
+model PaymentEvent {
+  id              String        @id @default(uuid()) @db.Uuid
+  providerEventId String        @unique @map("provider_event_id")
+  userId          String        @map("user_id") @db.Uuid
+  subscriptionId  String        @map("subscription_id") @db.Uuid
+  status          PaymentStatus
+  rawPayload      Json          @map("raw_payload")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscription    Subscription  @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("payment_events")
+}

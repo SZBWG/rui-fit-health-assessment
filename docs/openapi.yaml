@@ -1,0 +1,234 @@
+openapi: 3.1.0
+info:
+  title: RuiFit Health Assessment API
+  version: 1.0.0
+  description: Anonymous health assessment, protected results, and mock subscription flow.
+servers:
+  - url: http://localhost:3000/api/v1
+paths:
+  /sessions:
+    post:
+      summary: Create an anonymous user, session, and assessment
+      responses:
+        "201":
+          description: Session created; an HttpOnly cookie is also set.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [userId, sessionId, assessmentId, accessToken, expiresAt]
+                properties:
+                  userId: { type: string, format: uuid }
+                  sessionId: { type: string, format: uuid }
+                  assessmentId: { type: string, format: uuid }
+                  accessToken: { type: string }
+                  expiresAt: { type: string, format: date-time }
+  /assessments/current:
+    get:
+      summary: Restore the current assessment and server-derived progress
+      security: [{ bearerAuth: [] }, { sessionCookie: [] }]
+      responses:
+        "200":
+          description: Current progress
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AssessmentProgress" }
+        "401": { $ref: "#/components/responses/Problem" }
+  /assessments/current/steps/{stepKey}:
+    put:
+      summary: Replace one complete assessment step
+      security: [{ bearerAuth: [] }, { sessionCookie: [] }]
+      parameters:
+        - in: path
+          name: stepKey
+          required: true
+          schema:
+            type: string
+            enum: [age, gender, goal, height, weight, target-weight, activity]
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, maxLength: 100 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [data, baseRevision]
+              properties:
+                data: { type: object, description: Strict step-specific payload }
+                baseRevision: { type: integer, minimum: 0 }
+      responses:
+        "200":
+          description: Updated progress, or the original response for an identical replay
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AssessmentProgress" }
+        "409":
+          description: Revision conflict, locked assessment, or idempotency-key reuse
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /assessments/current/submit:
+    post:
+      summary: Validate the complete input and persist a versioned result
+      security: [{ bearerAuth: [] }, { sessionCookie: [] }]
+      responses:
+        "200":
+          description: Idempotent calculation receipt
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  assessmentId: { type: string, format: uuid }
+                  status: { const: COMPLETED }
+                  calculatedAt: { type: string, format: date-time }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /assessments/current/result:
+    get:
+      summary: Return a preview or full result according to active subscription state
+      security: [{ bearerAuth: [] }, { sessionCookie: [] }]
+      responses:
+        "200":
+          description: Protected result union
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/PreviewResult" }
+                  - { $ref: "#/components/schemas/FullResult" }
+                discriminator: { propertyName: access }
+        "409": { $ref: "#/components/responses/Problem" }
+  /pay:
+    post:
+      summary: Simulate an idempotent successful payment for the current session
+      security: [{ bearerAuth: [] }, { sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [eventId]
+              properties:
+                eventId: { type: string, minLength: 8, maxLength: 100 }
+                planCode: { const: demo_monthly, default: demo_monthly }
+      responses:
+        "200":
+          description: Active subscription; replayed is true for a repeated event
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  eventId: { type: string }
+                  subscriptionStatus: { const: ACTIVE }
+                  expiresAt: { type: [string, "null"], format: date-time }
+                  replayed: { type: boolean }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: health_session
+  responses:
+    Problem:
+      description: RFC 9457-style problem response
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        details: {}
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              path: { type: string }
+              message: { type: string }
+    AssessmentProgress:
+      type: object
+      required: [assessmentId, status, revision, completedSteps, nextStep, progressPercent, answers]
+      properties:
+        assessmentId: { type: string, format: uuid }
+        status: { type: string, enum: [IN_PROGRESS, COMPLETED] }
+        revision: { type: integer, minimum: 0 }
+        schemaVersion: { type: integer, minimum: 1 }
+        completedSteps:
+          type: array
+          items: { type: string }
+        nextStep: { type: [string, "null"] }
+        progressPercent: { type: integer, minimum: 0, maximum: 100 }
+        answers:
+          type: object
+          properties:
+            age: { type: [integer, "null"] }
+            gender: { type: [string, "null"] }
+            goal: { type: [string, "null"] }
+            heightCm: { type: [number, "null"] }
+            weightKg: { type: [number, "null"] }
+            targetWeightKg: { type: [number, "null"] }
+            activityLevel: { type: [string, "null"] }
+    PreviewResult:
+      type: object
+      additionalProperties: false
+      required: [access, subscriptionStatus, preview, lockedFields, upgradeRequired]
+      properties:
+        access: { const: PREVIEW }
+        subscriptionStatus: { type: string }
+        preview:
+          type: object
+          additionalProperties: false
+          required: [bmi, bmiCategory]
+          properties:
+            bmi: { type: number }
+            bmiCategory: { type: string }
+        lockedFields:
+          type: array
+          items: { type: string }
+        upgradeRequired: { const: true }
+    FullResult:
+      type: object
+      additionalProperties: false
+      required: [access, subscriptionStatus, result, upgradeRequired]
+      properties:
+        access: { const: FULL }
+        subscriptionStatus: { const: ACTIVE }
+        result:
+          type: object
+          required: [bmi, bmiCategory, estimatedBmr, estimatedDailyCalories, targetDate, projection, algorithmVersion]
+          properties:
+            bmi: { type: number }
+            bmiCategory: { type: string }
+            estimatedBmr: { type: integer }
+            estimatedDailyCalories: { type: integer }
+            targetDate: { type: string, format: date }
+            projection:
+              type: array
+              items:
+                type: object
+                properties:
+                  week: { type: integer }
+                  date: { type: string, format: date }
+                  weightKg: { type: number }
+            algorithmVersion: { type: string }
+        upgradeRequired: { const: false }

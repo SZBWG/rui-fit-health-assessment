@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: "true"
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/health_quiz
+      MIGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/health_quiz
+      SHADOW_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/health_quiz
+      SESSION_SECRET: ci-session-secret-with-at-least-32-characters
+      MOCK_PAY_ENABLED: "true"
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: health_quiz
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d health_quiz"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run verify
