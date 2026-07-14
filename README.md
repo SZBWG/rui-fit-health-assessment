@@ -1,6 +1,6 @@
 # RuiFit 健康测评
 
-[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
+[![CI](https://github.com/SZBWG/rui-fit-health-assessment/actions/workflows/ci.yml/badge.svg)](https://github.com/SZBWG/rui-fit-health-assessment/actions/workflows/ci.yml)
 
 一个围绕“分步保存 → 中断恢复 → 服务端计算 → 权限裁剪 → 模拟支付 → 完整结果”构建的全栈健康测评系统。
 
