@@ -4,6 +4,7 @@ info:
   version: 1.0.0
   description: Anonymous health assessment, protected results, and mock subscription flow.
 servers:
+  - url: https://rui-fit-health-assessment.vercel.app/api/v1
   - url: http://localhost:3000/api/v1
 paths:
   /sessions:

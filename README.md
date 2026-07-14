@@ -4,7 +4,7 @@
 
 一个围绕“分步保存 → 中断恢复 → 服务端计算 → 权限裁剪 → 模拟支付 → 完整结果”构建的全栈健康测评系统。
 
-> 线上演示：部署完成后填写
+> 线上演示：[https://rui-fit-health-assessment.vercel.app](https://rui-fit-health-assessment.vercel.app)
 
 ## 核心能力
 
@@ -26,7 +26,7 @@
 
 ## 本地启动
 
-要求 Node.js 22.13+。本地 PostgreSQL 使用 Prisma Dev，不要求 Docker。
+要求 Node.js 24。本地 PostgreSQL 使用 Prisma Dev，不要求 Docker。
 
 ```bash
 npm install
@@ -45,7 +45,7 @@ npm run dev
 |---|---|
 | `DATABASE_URL` | 应用运行时 PostgreSQL 连接 |
 | `MIGRATION_DATABASE_URL` | Prisma CLI 和迁移使用的直接连接 |
-| `SHADOW_DATABASE_URL` | 仅 `migrate dev` 需要；CI/部署可使用受控的独立连接 |
+| `SHADOW_DATABASE_URL` | 仅 `migrate dev` 需要；生产部署不设置 |
 | `SESSION_SECRET` | 至少 32 字符，用于 Session Token HMAC |
 | `MOCK_PAY_ENABLED` | 挑战演示环境设为 `true` |
 | `NEXT_PUBLIC_APP_URL` | 应用公网根地址 |
@@ -74,8 +74,8 @@ npm run build
 ### 可重放 `/pay` 调用
 
 ```bash
-BASE_URL=http://localhost:3000
-TOKEN=demo-free-token-2026-rui-fit
+BASE_URL=https://rui-fit-health-assessment.vercel.app
+TOKEN=demo-paid-token-2026-rui-fit
 
 curl -X POST "$BASE_URL/api/v1/pay" \
   -H "Authorization: Bearer $TOKEN" \
@@ -84,6 +84,7 @@ curl -X POST "$BASE_URL/api/v1/pay" \
 ```
 
 用同一个 `eventId` 再调用一次会返回 `"replayed": true`，不会新增第二个支付事件。
+示例使用已支付 Session，避免改变下方固定免费 Session 的对比状态；完整的“免费 → 支付 → 解锁”可直接在线上 Funnel 演示。
 
 ### 免费与已支付演示 Session
 
@@ -131,6 +132,9 @@ npm test              # 单元 + PostgreSQL 集成测试
 npm run test:coverage # 强制覆盖率阈值
 npm run test:e2e      # 浏览器完整 Funnel
 npm run verify        # lint + 类型 + 覆盖率 + build + E2E
+
+# 对已部署环境执行同一条浏览器闭环
+PLAYWRIGHT_BASE_URL=https://rui-fit-health-assessment.vercel.app npm run test:e2e
 ```
 
 当前覆盖：
@@ -146,7 +150,7 @@ npm run verify        # lint + 类型 + 覆盖率 + build + E2E
 - 浏览器刷新恢复、从第一题到付费解锁、付费后再次刷新。
 - PostgreSQL `CHECK` 约束。
 
-核心模块覆盖率门槛：行 80%、语句 80%、函数 80%、分支 75%。当前本地实测为行 89.5%、语句 88.18%、函数 96.87%、分支 83.33%。
+核心模块覆盖率门槛：行 80%、语句 80%、函数 80%、分支 75%。最近一次本地完整验证为行 89.5%、语句 88.18%、函数 96.87%、分支 83.33%；GitHub CI 运行相同门禁。
 
 暂未覆盖：
 
